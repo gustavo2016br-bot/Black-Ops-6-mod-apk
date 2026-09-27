@@ -15,15 +15,14 @@ jobs:
     timeout-minutes: 60
 
     steps:
+
       # ============================================================
-      # REPOSITÓRIO
+      # CHECKOUT
       # ============================================================
 
       - name: Checkout this repository
         uses: actions/checkout@v4
         with:
-          # Necessário porque o payload original do ControllerX
-          # está guardado em um commit anterior.
           fetch-depth: 0
 
 
@@ -39,7 +38,7 @@ jobs:
 
 
       # ============================================================
-      # MANTER A MESMA CHAVE DEBUG ENTRE BUILDS FUTURAS
+      # DEBUG KEY
       # ============================================================
 
       - name: Restore Android debug keystore
@@ -50,7 +49,7 @@ jobs:
 
 
       # ============================================================
-      # DEPENDÊNCIAS NATIVAS
+      # DEPENDENCIAS
       # ============================================================
 
       - name: Install native build dependencies
@@ -70,16 +69,14 @@ jobs:
             ninja-build \
             binutils
 
-          echo
           echo "========================================"
-          echo " protoc"
+          echo "PROTOC"
           echo "========================================"
 
           protoc --version
 
-          echo
           echo "========================================"
-          echo " Python protobuf"
+          echo "PYTHON PROTOBUF"
           echo "========================================"
 
           python3 - <<'PY'
@@ -87,9 +84,8 @@ jobs:
           print("protobuf Python OK:", google.protobuf.__version__)
           PY
 
-          echo
           echo "========================================"
-          echo " readelf"
+          echo "READELF"
           echo "========================================"
 
           readelf --version | head -1
@@ -112,23 +108,21 @@ jobs:
             "ndk;26.1.10909125" \
             "cmake;3.22.1"
 
-          echo
           echo "========================================"
-          echo " Android SDK"
+          echo "ANDROID SDK"
           echo "========================================"
 
           echo "$ANDROID_HOME"
 
-          echo
           echo "========================================"
-          echo " CMake"
+          echo "CMAKE"
           echo "========================================"
 
-          "$ANDROID_HOME/cmake/3.22.1/bin/cmake" --version
+          "$ANDROID_HOME/cmake/3.22.1/bin/cmake" \
+            --version
 
-          echo
           echo "========================================"
-          echo " Android NDK clang"
+          echo "NDK CLANG"
           echo "========================================"
 
           "$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
@@ -157,16 +151,15 @@ jobs:
             --init \
             --recursive
 
-          echo
           echo "========================================"
-          echo " Chiaki commit"
+          echo "CHIAKI COMMIT"
           echo "========================================"
 
           git rev-parse HEAD
 
 
       # ============================================================
-      # RECUPERAR O PATCH COMPLETO CONTROLLERX
+      # RESTAURAR CONTROLLERX
       # ============================================================
 
       - name: Restore ControllerX v3.2 PRO MODS patch
@@ -176,12 +169,10 @@ jobs:
 
           PAYLOAD_COMMIT="6ff6a84c8629c138e4f6035798d7033f1268238d"
 
-          echo
           echo "========================================"
-          echo " Recuperando ControllerX"
+          echo "RECUPERANDO CONTROLLERX"
           echo "========================================"
 
-          echo "Commit:"
           echo "$PAYLOAD_COMMIT"
 
           git show \
@@ -214,8 +205,8 @@ jobs:
 
           if start is None:
               raise SystemExit(
-                  "ERRO: inicio do payload "
-                  "CONTROLLERX_B64 nao encontrado."
+                  "ERRO: inicio CONTROLLERX_B64 "
+                  "nao encontrado."
               )
 
           for i in range(start, len(lines)):
@@ -225,8 +216,8 @@ jobs:
 
           if end is None:
               raise SystemExit(
-                  "ERRO: final do payload "
-                  "CONTROLLERX_B64 nao encontrado."
+                  "ERRO: fim CONTROLLERX_B64 "
+                  "nao encontrado."
               )
 
           payload_lines = [
@@ -235,28 +226,23 @@ jobs:
               if line.strip()
           ]
 
-          payload = "\n".join(payload_lines) + "\n"
+          payload = "\n".join(
+              payload_lines
+          ) + "\n"
 
-          output = Path(
+          Path(
               "/tmp/controllerx_patch.gz.b64"
-          )
-
-          output.write_text(
+          ).write_text(
               payload,
               encoding="utf-8"
           )
 
           print(
-              "Payload ControllerX recuperado:",
+              "Payload recuperado:",
               len(payload_lines),
               "linhas"
           )
           PY
-
-          echo
-          echo "========================================"
-          echo " Validando payload"
-          echo "========================================"
 
           base64 -d \
             /tmp/controllerx_patch.gz.b64 \
@@ -269,22 +255,667 @@ jobs:
             /tmp/controllerx_patch.gz \
             > /tmp/apply_controllerx_android.py
 
-          echo
-          echo "========================================"
-          echo " Aplicando ControllerX"
-          echo "========================================"
-
           cd upstream
 
           python3 \
             /tmp/apply_controllerx_android.py
 
-          echo
-          echo "ControllerX patch aplicado com sucesso."
+          echo "ControllerX aplicado."
 
 
       # ============================================================
-      # FIX DO OBOE ANTIGO PARA NDK 26
+      # SAFE BOOT
+      # ============================================================
+
+      - name: Apply ControllerX Android Safe Boot
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd upstream
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+
+          # ========================================================
+          # 1 - DISCOVERY DESLIGADO POR PADRAO
+          # ========================================================
+
+          prefs = Path(
+              "android/app/src/main/java/"
+              "com/metallic/chiaki/common/Preferences.kt"
+          )
+
+          if not prefs.exists():
+              raise SystemExit(
+                  "Preferences.kt nao encontrado."
+              )
+
+          text = prefs.read_text(
+              encoding="utf-8"
+          )
+
+          old = (
+              "get() = sharedPreferences."
+              "getBoolean(discoveryEnabledKey, true)"
+          )
+
+          new = (
+              "get() = sharedPreferences."
+              "getBoolean(discoveryEnabledKey, false)"
+          )
+
+          if old in text:
+              text = text.replace(
+                  old,
+                  new
+              )
+
+          if new not in text:
+              raise SystemExit(
+                  "Nao foi possivel corrigir "
+                  "discoveryEnabled."
+              )
+
+          prefs.write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          print(
+              "Discovery default OFF: OK"
+          )
+
+
+          # ========================================================
+          # 2 - GARANTIR DISCOVERY OFF AO CRIAR VIEWMODEL
+          # ========================================================
+
+          vm = Path(
+              "android/app/src/main/java/"
+              "com/metallic/chiaki/main/"
+              "MainViewModel.kt"
+          )
+
+          if not vm.exists():
+              raise SystemExit(
+                  "MainViewModel.kt nao encontrado."
+              )
+
+          text = vm.read_text(
+              encoding="utf-8"
+          )
+
+          original = (
+              "it.active = preferences.discoveryEnabled"
+          )
+
+          replacement = (
+              "preferences.discoveryEnabled = false\n"
+              "\t\tit.active = false"
+          )
+
+          if original in text:
+              text = text.replace(
+                  original,
+                  replacement,
+                  1
+              )
+
+          if "it.active = false" not in text:
+              raise SystemExit(
+                  "Nao foi possivel desativar "
+                  "Discovery no MainViewModel."
+              )
+
+          vm.write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          print(
+              "MainViewModel Safe Boot: OK"
+          )
+
+
+          # ========================================================
+          # 3 - NÃO INICIAR DISCOVERY EM onStart
+          # ========================================================
+
+          main = Path(
+              "android/app/src/main/java/"
+              "com/metallic/chiaki/main/"
+              "MainActivity.kt"
+          )
+
+          if not main.exists():
+              raise SystemExit(
+                  "MainActivity.kt nao encontrado."
+              )
+
+          text = main.read_text(
+              encoding="utf-8"
+          )
+
+          text = text.replace(
+              "viewModel.discoveryManager.resume()",
+              "// ControllerX Safe Boot: "
+              "Discovery desativado"
+          )
+
+          text = text.replace(
+              "viewModel.discoveryManager.pause()",
+              "// ControllerX Safe Boot: "
+              "Discovery permanece desativado"
+          )
+
+          discovery_menu = (
+              "discoveryMenuItem = discoveryItem"
+          )
+
+          if (
+              discovery_menu in text
+              and
+              "discoveryItem.isVisible = false"
+              not in text
+          ):
+
+              text = text.replace(
+                  discovery_menu,
+                  discovery_menu +
+                  "\n\t\tdiscoveryItem.isVisible = false",
+                  1
+              )
+
+          main.write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          print(
+              "MainActivity Discovery bloqueado: OK"
+          )
+
+
+          # ========================================================
+          # 4 - CRIAR SAFE BOOT ACTIVITY
+          #
+          # Essa Activity NAO usa ChiakiNative.
+          # Ela abre antes de MainActivity.
+          # ========================================================
+
+          safe_dir = Path(
+              "android/app/src/main/java/"
+              "com/metallic/chiaki/safeboot"
+          )
+
+          safe_dir.mkdir(
+              parents=True,
+              exist_ok=True
+          )
+
+          safe_activity = (
+              safe_dir /
+              "SafeBootActivity.kt"
+          )
+
+          safe_activity.write_text(
+          r'''package com.metallic.chiaki.safeboot
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.graphics.Color
+          import android.os.Bundle
+          import android.view.Gravity
+          import android.view.ViewGroup
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import androidx.preference.PreferenceManager
+          import com.metallic.chiaki.R
+          import com.metallic.chiaki.main.MainActivity
+
+          class SafeBootActivity : Activity()
+          {
+              override fun onCreate(savedInstanceState: Bundle?)
+              {
+                  super.onCreate(savedInstanceState)
+
+                  forceDiscoveryOff()
+
+                  window.statusBarColor =
+                      Color.rgb(12, 8, 20)
+
+                  window.navigationBarColor =
+                      Color.rgb(12, 8, 20)
+
+                  val density =
+                      resources.displayMetrics.density
+
+                  fun dp(value: Int): Int
+                  {
+                      return (value * density).toInt()
+                  }
+
+                  val root = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+
+                      gravity = Gravity.CENTER
+
+                      setPadding(
+                          dp(28),
+                          dp(28),
+                          dp(28),
+                          dp(28)
+                      )
+
+                      setBackgroundColor(
+                          Color.rgb(
+                              12,
+                              8,
+                              20
+                          )
+                      )
+                  }
+
+                  val title = TextView(this).apply {
+                      text = "ControllerX"
+
+                      textSize = 30f
+
+                      setTextColor(
+                          Color.rgb(
+                              190,
+                              120,
+                              255
+                          )
+                      )
+
+                      gravity = Gravity.CENTER
+                  }
+
+                  val subtitle = TextView(this).apply {
+                      text =
+                          "Android Safe Boot\n" +
+                          "Remote Play • ControllerX"
+
+                      textSize = 16f
+
+                      setTextColor(
+                          Color.rgb(
+                              220,
+                              220,
+                              225
+                          )
+                      )
+
+                      gravity = Gravity.CENTER
+
+                      setPadding(
+                          0,
+                          dp(14),
+                          0,
+                          dp(30)
+                      )
+                  }
+
+                  val info = TextView(this).apply {
+                      text =
+                          "Inicialização segura ativa.\n" +
+                          "A descoberta automática do PS5 " +
+                          "está desativada para evitar " +
+                          "falha durante a abertura."
+
+                      textSize = 14f
+
+                      setTextColor(
+                          Color.rgb(
+                              175,
+                              175,
+                              185
+                          )
+                      )
+
+                      gravity = Gravity.CENTER
+
+                      setPadding(
+                          0,
+                          0,
+                          0,
+                          dp(28)
+                      )
+                  }
+
+                  val openButton = Button(this).apply {
+                      text = "ABRIR CONTROLLERX"
+
+                      textSize = 16f
+
+                      setOnClickListener {
+
+                          forceDiscoveryOff()
+
+                          val intent = Intent(
+                              this@SafeBootActivity,
+                              MainActivity::class.java
+                          )
+
+                          startActivity(intent)
+                      }
+                  }
+
+                  root.addView(
+                      title,
+                      LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      )
+                  )
+
+                  root.addView(
+                      subtitle,
+                      LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      )
+                  )
+
+                  root.addView(
+                      info,
+                      LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      )
+                  )
+
+                  root.addView(
+                      openButton,
+                      LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          dp(58)
+                      )
+                  )
+
+                  setContentView(root)
+              }
+
+
+              private fun forceDiscoveryOff()
+              {
+                  try
+                  {
+                      val prefs =
+                          PreferenceManager
+                              .getDefaultSharedPreferences(this)
+
+                      val key =
+                          getString(
+                              R.string
+                                  .preferences_discovery_enabled_key
+                          )
+
+                      prefs
+                          .edit()
+                          .putBoolean(
+                              key,
+                              false
+                          )
+                          .commit()
+                  }
+                  catch(_: Throwable)
+                  {
+                      // Safe Boot deve continuar mesmo
+                      // se a preferência falhar.
+                  }
+              }
+          }
+          ''',
+              encoding="utf-8"
+          )
+
+          print(
+              "SafeBootActivity criada: OK"
+          )
+
+
+          # ========================================================
+          # 5 - SAFE BOOT PASSA A SER O LAUNCHER
+          # ========================================================
+
+          manifest_path = Path(
+              "android/app/src/main/"
+              "AndroidManifest.xml"
+          )
+
+          ANDROID_NS = (
+              "http://schemas.android.com/apk/res/android"
+          )
+
+          TOOLS_NS = (
+              "http://schemas.android.com/tools"
+          )
+
+          ET.register_namespace(
+              "android",
+              ANDROID_NS
+          )
+
+          ET.register_namespace(
+              "tools",
+              TOOLS_NS
+          )
+
+          tree = ET.parse(
+              manifest_path
+          )
+
+          root = tree.getroot()
+
+          application = root.find(
+              "application"
+          )
+
+          if application is None:
+              raise SystemExit(
+                  "Application nao encontrada "
+                  "no Manifest."
+              )
+
+          name_attr = (
+              "{" +
+              ANDROID_NS +
+              "}name"
+          )
+
+          exported_attr = (
+              "{" +
+              ANDROID_NS +
+              "}exported"
+          )
+
+          theme_attr = (
+              "{" +
+              ANDROID_NS +
+              "}theme"
+          )
+
+          launcher_removed = False
+
+
+          # Remove MAIN/LAUNCHER da MainActivity
+          for activity in application.findall(
+              "activity"
+          ):
+
+              if (
+                  activity.get(name_attr)
+                  != ".main.MainActivity"
+              ):
+                  continue
+
+              for intent_filter in list(
+                  activity.findall(
+                      "intent-filter"
+                  )
+              ):
+
+                  has_main = False
+                  has_launcher = False
+
+                  for action in intent_filter.findall(
+                      "action"
+                  ):
+
+                      if (
+                          action.get(name_attr)
+                          ==
+                          "android.intent.action.MAIN"
+                      ):
+                          has_main = True
+
+                  for category in intent_filter.findall(
+                      "category"
+                  ):
+
+                      if (
+                          category.get(name_attr)
+                          ==
+                          "android.intent.category.LAUNCHER"
+                      ):
+                          has_launcher = True
+
+                  if has_main and has_launcher:
+
+                      activity.remove(
+                          intent_filter
+                      )
+
+                      launcher_removed = True
+
+
+          # Remove SafeBoot antiga se existir
+          for activity in list(
+              application.findall(
+                  "activity"
+              )
+          ):
+
+              if (
+                  activity.get(name_attr)
+                  ==
+                  ".safeboot.SafeBootActivity"
+              ):
+
+                  application.remove(
+                      activity
+                  )
+
+
+          # Cria nova SafeBootActivity
+          safe = ET.Element(
+              "activity"
+          )
+
+          safe.set(
+              name_attr,
+              ".safeboot.SafeBootActivity"
+          )
+
+          safe.set(
+              exported_attr,
+              "true"
+          )
+
+          safe.set(
+              theme_attr,
+              "@style/AppTheme"
+          )
+
+          intent_filter = ET.SubElement(
+              safe,
+              "intent-filter"
+          )
+
+          action = ET.SubElement(
+              intent_filter,
+              "action"
+          )
+
+          action.set(
+              name_attr,
+              "android.intent.action.MAIN"
+          )
+
+          category = ET.SubElement(
+              intent_filter,
+              "category"
+          )
+
+          category.set(
+              name_attr,
+              "android.intent.category.LAUNCHER"
+          )
+
+          application.insert(
+              0,
+              safe
+          )
+
+          tree.write(
+              manifest_path,
+              encoding="utf-8",
+              xml_declaration=True
+          )
+
+          if not launcher_removed:
+              print(
+                  "AVISO: launcher antigo "
+                  "nao foi encontrado."
+              )
+
+          print(
+              "Safe Boot launcher: OK"
+          )
+          PY
+
+
+      # ============================================================
+      # VALIDAR SAFE BOOT
+      # ============================================================
+
+      - name: Validate Safe Boot source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd upstream
+
+          echo "========================================"
+          echo "VALIDANDO SAFE BOOT"
+          echo "========================================"
+
+          test -f \
+            android/app/src/main/java/com/metallic/chiaki/safeboot/SafeBootActivity.kt
+
+          grep -n \
+            "discoveryEnabledKey, false" \
+            android/app/src/main/java/com/metallic/chiaki/common/Preferences.kt
+
+          grep -n \
+            "it.active = false" \
+            android/app/src/main/java/com/metallic/chiaki/main/MainViewModel.kt
+
+          grep -n \
+            "SafeBootActivity" \
+            android/app/src/main/AndroidManifest.xml
+
+          echo "Safe Boot source: OK"
+
+
+      # ============================================================
+      # OBOE / NDK 26
       # ============================================================
 
       - name: Fix old Oboe for Android NDK 26
@@ -303,13 +934,14 @@ jobs:
 
           if not root.exists():
               raise SystemExit(
-                  "ERRO: pasta Oboe nao encontrada: "
-                  + str(root)
+                  "Pasta Oboe nao encontrada."
               )
 
           patched = []
 
-          for path in root.rglob("*.cpp"):
+          for path in root.rglob(
+              "*.cpp"
+          ):
 
               text = path.read_text(
                   encoding="utf-8",
@@ -322,13 +954,8 @@ jobs:
               if "#include <cassert>" in text:
                   continue
 
-              new_text = (
-                  "#include <cassert>\n"
-                  + text
-              )
-
               path.write_text(
-                  new_text,
+                  "#include <cassert>\n" + text,
                   encoding="utf-8"
               )
 
@@ -343,14 +970,13 @@ jobs:
 
           for path in patched:
               print(
-                  "  +",
+                  "+",
                   path
               )
           PY
 
-          echo
           echo "========================================"
-          echo " Verificando Oboe"
+          echo "OBOE"
           echo "========================================"
 
           for FILE in \
@@ -358,10 +984,8 @@ jobs:
             android/app/src/main/cpp/oboe/src/flowgraph/resampler/PolyphaseResamplerMono.cpp \
             android/app/src/main/cpp/oboe/src/flowgraph/resampler/PolyphaseResamplerStereo.cpp
           do
-            if [ -f "$FILE" ]; then
 
-              echo
-              echo "----- $FILE -----"
+            if [ -f "$FILE" ]; then
 
               grep -n \
                 -E '#include <cassert>|assert\(' \
@@ -369,12 +993,12 @@ jobs:
                 | head -20
 
             fi
+
           done
 
 
       # ============================================================
-      # ANDROID 15 / 16
-      # FIX DE BIBLIOTECA NATIVA E PÁGINAS DE 16 KB
+      # ANDROID 15 / 16 - 16 KB
       # ============================================================
 
       - name: Fix Android 15 and 16 native library compatibility
@@ -389,76 +1013,64 @@ jobs:
 
 
           # ========================================================
-          # CMAKE
+          # CMAKE 16 KB
           # ========================================================
 
           cmake = Path(
               "android/app/CMakeLists.txt"
           )
 
-          cmake_text = cmake.read_text(
+          text = cmake.read_text(
               encoding="utf-8"
           )
 
-          marker = (
-              "# ControllerX Android 16KB compatibility"
-          )
+          if (
+              "max-page-size=16384"
+              not in text
+          ):
 
-          if marker not in cmake_text:
+              text += r'''
 
-              block = r'''
-
-          # ControllerX Android 16KB compatibility
-          #
-          # Android 15/16 pode usar páginas de memória de 16 KB.
-          # A biblioteca nativa precisa ter segmentos LOAD
-          # compatíveis.
-
+          # ControllerX Android 16 KB
           target_link_options(
               chiaki-jni
               PRIVATE
               "-Wl,-z,max-page-size=16384"
           )
+
           '''
 
-              cmake_text += block
-
               cmake.write_text(
-                  cmake_text,
+                  text,
                   encoding="utf-8"
               )
 
-              print(
-                  "CMake linker 16KB adicionado."
-              )
-
-          else:
-              print(
-                  "CMake linker 16KB ja presente."
-              )
+          print(
+              "CMake 16KB: OK"
+          )
 
 
           # ========================================================
-          # GRADLE
-          #
-          # Faz a lib nativa ser extraída durante a instalação.
-          # Isso evita depender de mmap direto do .so dentro do APK.
+          # LEGACY JNI PACKAGING
           # ========================================================
 
           gradle = Path(
               "android/app/build.gradle"
           )
 
-          gradle_text = gradle.read_text(
+          text = gradle.read_text(
               encoding="utf-8"
           )
 
-          if "useLegacyPackaging = true" not in gradle_text:
+          if (
+              "useLegacyPackaging = true"
+              not in text
+          ):
 
-              gradle_marker = '''    buildFeatures {
+              marker = '''    buildFeatures {
           '''
 
-              gradle_block = '''    packaging {
+              block = '''    packaging {
               jniLibs {
                   useLegacyPackaging = true
               }
@@ -466,114 +1078,98 @@ jobs:
 
           '''
 
-              if gradle_marker not in gradle_text:
+              if marker not in text:
                   raise SystemExit(
-                      "ERRO: buildFeatures nao encontrado "
-                      "em android/app/build.gradle."
+                      "buildFeatures nao encontrado."
                   )
 
-              gradle_text = gradle_text.replace(
-                  gradle_marker,
-                  gradle_block + gradle_marker,
+              text = text.replace(
+                  marker,
+                  block + marker,
                   1
               )
 
               gradle.write_text(
-                  gradle_text,
+                  text,
                   encoding="utf-8"
               )
 
-              print(
-                  "Legacy JNI packaging adicionado."
-              )
-
-          else:
-              print(
-                  "Legacy JNI packaging ja presente."
-              )
+          print(
+              "Legacy JNI packaging: OK"
+          )
 
 
           # ========================================================
-          # MANIFEST
+          # EXTRACT NATIVE LIBS
           # ========================================================
 
           manifest = Path(
-              "android/app/src/main/AndroidManifest.xml"
+              "android/app/src/main/"
+              "AndroidManifest.xml"
           )
 
-          manifest_text = manifest.read_text(
+          text = manifest.read_text(
               encoding="utf-8"
           )
 
           if (
               'android:extractNativeLibs="true"'
-              not in manifest_text
+              not in text
           ):
 
-              app_marker = '''    <application
-          '''
+              marker = (
+                  "<application"
+              )
 
-              replacement = '''    <application
-              android:extractNativeLibs="true"
-          '''
+              position = text.find(
+                  marker
+              )
 
-              if app_marker not in manifest_text:
+              if position < 0:
                   raise SystemExit(
-                      "ERRO: <application> nao encontrado "
-                      "no AndroidManifest.xml."
+                      "Application nao encontrada."
                   )
 
-              manifest_text = manifest_text.replace(
-                  app_marker,
-                  replacement,
-                  1
+              end = position + len(
+                  marker
+              )
+
+              text = (
+                  text[:end]
+                  +
+                  '\n        android:extractNativeLibs="true"'
+                  +
+                  text[end:]
               )
 
               manifest.write_text(
-                  manifest_text,
+                  text,
                   encoding="utf-8"
               )
 
-              print(
-                  "extractNativeLibs=true adicionado."
-              )
-
-          else:
-              print(
-                  "extractNativeLibs=true ja presente."
-              )
+          print(
+              "extractNativeLibs: OK"
+          )
           PY
 
-          echo
-          echo "========================================"
-          echo " Verificando fix Android 15/16"
-          echo "========================================"
 
-          grep -n \
-            "max-page-size" \
-            android/app/CMakeLists.txt
+      # ============================================================
+      # SALVAR DIFF
+      # ============================================================
 
-          echo
-
-          grep -n \
-            -A5 \
-            "packaging {" \
-            android/app/build.gradle
-
-          echo
-
-          grep -n \
-            "extractNativeLibs" \
-            android/app/src/main/AndroidManifest.xml
-
-          cd ..
+      - name: Save patched source diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
 
           git -C upstream diff -- . \
             > controllerx-patched-source.diff
 
+          echo "Source diff salvo."
+
 
       # ============================================================
-      # LIMPAR CACHE NATIVO
+      # LIMPAR CACHE CMAKE
       # ============================================================
 
       - name: Clean stale Android native build cache
@@ -587,8 +1183,7 @@ jobs:
           rm -rf \
             upstream/android/app/build/intermediates/cxx
 
-          echo
-          echo "Cache CMake antigo removido."
+          echo "CMake cache limpo."
 
 
       # ============================================================
@@ -604,16 +1199,14 @@ jobs:
 
           chmod +x gradlew
 
-          echo
           echo "========================================"
-          echo " Gradle"
+          echo "GRADLE"
           echo "========================================"
 
           ./gradlew --version
 
-          echo
           echo "========================================"
-          echo " Compilando ControllerX"
+          echo "BUILD CONTROLLERX SAFE BOOT"
           echo "========================================"
 
           ./gradlew \
@@ -626,7 +1219,7 @@ jobs:
 
 
       # ============================================================
-      # VALIDAR O APK ANTES DE ENTREGAR
+      # VALIDAR APK
       # ============================================================
 
       - name: Validate ControllerX APK
@@ -637,18 +1230,21 @@ jobs:
           APK="upstream/android/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "ERRO: APK nao encontrado."
+
+            echo "APK nao encontrado."
+
             exit 1
+
           fi
 
-          echo
           echo "========================================"
-          echo " APK encontrado"
+          echo "APK"
           echo "========================================"
 
           ls -lh "$APK"
 
-          rm -rf /tmp/controllerx-apk-check
+          rm -rf \
+            /tmp/controllerx-apk-check
 
           mkdir -p \
             /tmp/controllerx-apk-check
@@ -662,15 +1258,14 @@ jobs:
             /tmp/controllerx-apk-check/libchiaki-jni.so \
           ]; then
 
-            echo
-            echo "ERRO: libchiaki-jni.so ARM64 nao encontrada."
+            echo "libchiaki-jni.so nao encontrada."
 
             exit 1
+
           fi
 
-          echo
           echo "========================================"
-          echo " ELF ARM64"
+          echo "ELF"
           echo "========================================"
 
           readelf -lW \
@@ -678,51 +1273,46 @@ jobs:
             | tee \
             controllerx-readelf-arm64.txt
 
-          echo
-          echo "========================================"
-          echo " Alinhamento dos segmentos LOAD"
-          echo "========================================"
-
           mapfile -t LOAD_ALIGNMENTS < <(
             readelf -lW \
               /tmp/controllerx-apk-check/libchiaki-jni.so \
               | awk '$1 == "LOAD" {print $NF}'
           )
 
-          if [ "${#LOAD_ALIGNMENTS[@]}" -eq 0 ]; then
+          if [ \
+            "${#LOAD_ALIGNMENTS[@]}" \
+            -eq 0 \
+          ]; then
 
-            echo "ERRO: nenhum segmento LOAD encontrado."
+            echo "Nenhum segmento LOAD encontrado."
 
             exit 1
+
           fi
 
-          for ALIGN in "${LOAD_ALIGNMENTS[@]}"
+          for ALIGN in \
+            "${LOAD_ALIGNMENTS[@]}"
           do
 
-            echo "LOAD alignment: $ALIGN"
+            echo "LOAD: $ALIGN"
 
             ALIGN_DEC=$((ALIGN))
 
-            if [ "$ALIGN_DEC" -lt 16384 ]; then
+            if [ \
+              "$ALIGN_DEC" \
+              -lt 16384 \
+            ]; then
 
-              echo
-              echo "ERRO:"
-              echo "Biblioteca ARM64 ainda possui"
-              echo "segmento abaixo de 16 KB."
+              echo "ELF abaixo de 16 KB."
 
               exit 1
+
             fi
 
           done
 
-          echo
           echo "========================================"
-          echo " 16 KB ELF: OK"
-          echo "========================================"
-
-          echo
-          echo "========================================"
-          echo " APK JNI entry"
+          echo "16 KB ELF OK"
           echo "========================================"
 
           unzip -lv \
@@ -732,12 +1322,43 @@ jobs:
             | tee \
             controllerx-apk-jni-entry.txt
 
-          echo
-          echo "APK passou na verificacao nativa."
+
+      # ============================================================
+      # VALIDAR SAFE BOOT DENTRO DO APK
+      # ============================================================
+
+      - name: Validate Safe Boot inside APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="upstream/android/app/build/outputs/apk/debug/app-debug.apk"
+
+          echo "========================================"
+          echo "VALIDANDO SAFE BOOT APK"
+          echo "========================================"
+
+          AAPT="$ANDROID_HOME/build-tools/34.0.0/aapt"
+
+          "$AAPT" dump badging "$APK" \
+            | tee \
+            controllerx-apk-badging.txt
+
+          "$AAPT" dump xmltree \
+            "$APK" \
+            AndroidManifest.xml \
+            | tee \
+            controllerx-apk-manifest.txt
+
+          grep -q \
+            "SafeBootActivity" \
+            controllerx-apk-manifest.txt
+
+          echo "SafeBootActivity encontrada no APK."
 
 
       # ============================================================
-      # PREPARAR ARTEFATO
+      # PREPARAR APK FINAL
       # ============================================================
 
       - name: Prepare APK artifact
@@ -748,44 +1369,45 @@ jobs:
 
           APK="upstream/android/app/build/outputs/apk/debug/app-debug.apk"
 
+          FINAL="ControllerX-Android-v3.3-SAFEBOOT.apk"
+
           test -f "$APK"
 
           cp \
             "$APK" \
-            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.apk
+            "$FINAL"
 
           sha256sum \
-            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.apk \
+            "$FINAL" \
             | tee \
-            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.sha256
+            ControllerX-Android-v3.3-SAFEBOOT.sha256
 
-          echo
           echo "========================================"
-          echo " APK FINAL GERADO"
+          echo "APK FINAL"
           echo "========================================"
 
           ls -lh \
-            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.apk
+            "$FINAL"
 
 
       # ============================================================
-      # UPLOAD DO APK
+      # UPLOAD APK
       # ============================================================
 
       - name: Upload ControllerX APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ControllerX-Android-APK
+          name: ControllerX-Android-SAFEBOOT-APK
           path: |
-            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.apk
-            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.sha256
+            ControllerX-Android-v3.3-SAFEBOOT.apk
+            ControllerX-Android-v3.3-SAFEBOOT.sha256
           if-no-files-found: error
           retention-days: 30
 
 
       # ============================================================
-      # DIAGNÓSTICOS
+      # DIAGNOSTICOS
       # ============================================================
 
       - name: Upload build diagnostics
@@ -798,5 +1420,7 @@ jobs:
             controllerx-patched-source.diff
             controllerx-readelf-arm64.txt
             controllerx-apk-jni-entry.txt
+            controllerx-apk-badging.txt
+            controllerx-apk-manifest.txt
           if-no-files-found: ignore
           retention-days: 14
