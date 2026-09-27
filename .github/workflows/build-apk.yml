@@ -15,18 +15,43 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # ============================================================
+      # REPOSITÓRIO
+      # ============================================================
+
       - name: Checkout this repository
         uses: actions/checkout@v4
         with:
-          # Precisamos do histórico porque o payload grande do
-          # ControllerX está salvo no commit anterior.
+          # Necessário porque o payload original do ControllerX
+          # está guardado em um commit anterior.
           fetch-depth: 0
+
+
+      # ============================================================
+      # JAVA
+      # ============================================================
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+
+      # ============================================================
+      # MANTER A MESMA CHAVE DEBUG ENTRE BUILDS FUTURAS
+      # ============================================================
+
+      - name: Restore Android debug keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: controllerx-android-debug-keystore-v1
+
+
+      # ============================================================
+      # DEPENDÊNCIAS NATIVAS
+      # ============================================================
 
       - name: Install native build dependencies
         shell: bash
@@ -41,16 +66,38 @@ jobs:
             python3 \
             git \
             unzip \
-            ninja-build
+            zip \
+            ninja-build \
+            binutils
 
-          echo "===== protoc ====="
+          echo
+          echo "========================================"
+          echo " protoc"
+          echo "========================================"
+
           protoc --version
 
-          echo "===== Python protobuf ====="
+          echo
+          echo "========================================"
+          echo " Python protobuf"
+          echo "========================================"
+
           python3 - <<'PY'
           import google.protobuf
           print("protobuf Python OK:", google.protobuf.__version__)
           PY
+
+          echo
+          echo "========================================"
+          echo " readelf"
+          echo "========================================"
+
+          readelf --version | head -1
+
+
+      # ============================================================
+      # ANDROID SDK / NDK / CMAKE
+      # ============================================================
 
       - name: Install Android NDK and CMake
         shell: bash
@@ -65,14 +112,32 @@ jobs:
             "ndk;26.1.10909125" \
             "cmake;3.22.1"
 
-          echo "===== Android SDK ====="
+          echo
+          echo "========================================"
+          echo " Android SDK"
+          echo "========================================"
+
           echo "$ANDROID_HOME"
 
-          echo "===== CMake ====="
+          echo
+          echo "========================================"
+          echo " CMake"
+          echo "========================================"
+
           "$ANDROID_HOME/cmake/3.22.1/bin/cmake" --version
 
-          echo "===== NDK clang ====="
-          "$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
+          echo
+          echo "========================================"
+          echo " Android NDK clang"
+          echo "========================================"
+
+          "$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
+            --version
+
+
+      # ============================================================
+      # CHIAKI ANDROID
+      # ============================================================
 
       - name: Clone pinned Chiaki Android base
         shell: bash
@@ -85,23 +150,38 @@ jobs:
 
           cd upstream
 
-          git checkout 478a20eab9e55651ae77035764cf3138bd14084b
+          git checkout \
+            478a20eab9e55651ae77035764cf3138bd14084b
 
-          git submodule update --init --recursive
+          git submodule update \
+            --init \
+            --recursive
 
-          echo "===== Chiaki commit ====="
+          echo
+          echo "========================================"
+          echo " Chiaki commit"
+          echo "========================================"
+
           git rev-parse HEAD
+
+
+      # ============================================================
+      # RECUPERAR O PATCH COMPLETO CONTROLLERX
+      # ============================================================
 
       - name: Restore ControllerX v3.2 PRO MODS patch
         shell: bash
         run: |
           set -euo pipefail
 
-          # Esse é o commit da build #2 que contém o payload completo
-          # do ControllerX dentro do workflow anterior.
           PAYLOAD_COMMIT="6ff6a84c8629c138e4f6035798d7033f1268238d"
 
-          echo "Recuperando payload ControllerX do commit:"
+          echo
+          echo "========================================"
+          echo " Recuperando ControllerX"
+          echo "========================================"
+
+          echo "Commit:"
           echo "$PAYLOAD_COMMIT"
 
           git show \
@@ -111,7 +191,9 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          source = Path("/tmp/controllerx-old-workflow.yml").read_text(
+          source = Path(
+              "/tmp/controllerx-old-workflow.yml"
+          ).read_text(
               encoding="utf-8"
           )
 
@@ -120,14 +202,20 @@ jobs:
           start = None
           end = None
 
+          marker = (
+              "cat > /tmp/controllerx_patch.gz.b64 "
+              "<<'CONTROLLERX_B64'"
+          )
+
           for i, line in enumerate(lines):
-              if "cat > /tmp/controllerx_patch.gz.b64 <<'CONTROLLERX_B64'" in line:
+              if marker in line:
                   start = i + 1
                   break
 
           if start is None:
               raise SystemExit(
-                  "ERRO: inicio do payload CONTROLLERX_B64 nao encontrado."
+                  "ERRO: inicio do payload "
+                  "CONTROLLERX_B64 nao encontrado."
               )
 
           for i in range(start, len(lines)):
@@ -137,10 +225,10 @@ jobs:
 
           if end is None:
               raise SystemExit(
-                  "ERRO: fim do payload CONTROLLERX_B64 nao encontrado."
+                  "ERRO: final do payload "
+                  "CONTROLLERX_B64 nao encontrado."
               )
 
-          # As linhas do base64 só possuem o conteúdo + indentação YAML.
           payload_lines = [
               line.strip()
               for line in lines[start:end]
@@ -149,7 +237,11 @@ jobs:
 
           payload = "\n".join(payload_lines) + "\n"
 
-          Path("/tmp/controllerx_patch.gz.b64").write_text(
+          output = Path(
+              "/tmp/controllerx_patch.gz.b64"
+          )
+
+          output.write_text(
               payload,
               encoding="utf-8"
           )
@@ -161,25 +253,39 @@ jobs:
           )
           PY
 
-          echo "===== Validando base64/gzip ====="
+          echo
+          echo "========================================"
+          echo " Validando payload"
+          echo "========================================"
 
           base64 -d \
             /tmp/controllerx_patch.gz.b64 \
             > /tmp/controllerx_patch.gz
 
-          gzip -t /tmp/controllerx_patch.gz
+          gzip -t \
+            /tmp/controllerx_patch.gz
 
           gzip -dc \
             /tmp/controllerx_patch.gz \
             > /tmp/apply_controllerx_android.py
 
-          echo "===== Aplicando ControllerX ====="
+          echo
+          echo "========================================"
+          echo " Aplicando ControllerX"
+          echo "========================================"
 
           cd upstream
 
-          python3 /tmp/apply_controllerx_android.py
+          python3 \
+            /tmp/apply_controllerx_android.py
 
-          echo "ControllerX patch aplicado."
+          echo
+          echo "ControllerX patch aplicado com sucesso."
+
+
+      # ============================================================
+      # FIX DO OBOE ANTIGO PARA NDK 26
+      # ============================================================
 
       - name: Fix old Oboe for Android NDK 26
         shell: bash
@@ -197,47 +303,55 @@ jobs:
 
           if not root.exists():
               raise SystemExit(
-                  f"ERRO: pasta Oboe nao encontrada: {root}"
+                  "ERRO: pasta Oboe nao encontrada: "
+                  + str(root)
               )
 
           patched = []
 
           for path in root.rglob("*.cpp"):
+
               text = path.read_text(
                   encoding="utf-8",
                   errors="ignore"
               )
 
-              # O Oboe antigo utiliza assert() em alguns arquivos,
-              # mas não inclui <cassert>. Com o NDK 26 isso falha.
               if "assert(" not in text:
                   continue
 
               if "#include <cassert>" in text:
                   continue
 
-              new_text = "#include <cassert>\n" + text
+              new_text = (
+                  "#include <cassert>\n"
+                  + text
+              )
 
               path.write_text(
                   new_text,
                   encoding="utf-8"
               )
 
-              patched.append(str(path))
+              patched.append(
+                  str(path)
+              )
 
-          print("Arquivos Oboe corrigidos:")
+          print(
+              "Arquivos Oboe corrigidos:",
+              len(patched)
+          )
 
           for path in patched:
-              print("  +", path)
-
-          if not patched:
               print(
-                  "Nenhum arquivo precisou de patch "
-                  "(possivelmente ja corrigido)."
+                  "  +",
+                  path
               )
           PY
 
-          echo "===== Verificando PolyphaseResampler ====="
+          echo
+          echo "========================================"
+          echo " Verificando Oboe"
+          echo "========================================"
 
           for FILE in \
             android/app/src/main/cpp/oboe/src/flowgraph/resampler/PolyphaseResampler.cpp \
@@ -245,6 +359,7 @@ jobs:
             android/app/src/main/cpp/oboe/src/flowgraph/resampler/PolyphaseResamplerStereo.cpp
           do
             if [ -f "$FILE" ]; then
+
               echo
               echo "----- $FILE -----"
 
@@ -252,23 +367,233 @@ jobs:
                 -E '#include <cassert>|assert\(' \
                 "$FILE" \
                 | head -20
+
             fi
           done
+
+
+      # ============================================================
+      # ANDROID 15 / 16
+      # FIX DE BIBLIOTECA NATIVA E PÁGINAS DE 16 KB
+      # ============================================================
+
+      - name: Fix Android 15 and 16 native library compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd upstream
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+
+          # ========================================================
+          # CMAKE
+          # ========================================================
+
+          cmake = Path(
+              "android/app/CMakeLists.txt"
+          )
+
+          cmake_text = cmake.read_text(
+              encoding="utf-8"
+          )
+
+          marker = (
+              "# ControllerX Android 16KB compatibility"
+          )
+
+          if marker not in cmake_text:
+
+              block = r'''
+
+          # ControllerX Android 16KB compatibility
+          #
+          # Android 15/16 pode usar páginas de memória de 16 KB.
+          # A biblioteca nativa precisa ter segmentos LOAD
+          # compatíveis.
+
+          target_link_options(
+              chiaki-jni
+              PRIVATE
+              "-Wl,-z,max-page-size=16384"
+          )
+          '''
+
+              cmake_text += block
+
+              cmake.write_text(
+                  cmake_text,
+                  encoding="utf-8"
+              )
+
+              print(
+                  "CMake linker 16KB adicionado."
+              )
+
+          else:
+              print(
+                  "CMake linker 16KB ja presente."
+              )
+
+
+          # ========================================================
+          # GRADLE
+          #
+          # Faz a lib nativa ser extraída durante a instalação.
+          # Isso evita depender de mmap direto do .so dentro do APK.
+          # ========================================================
+
+          gradle = Path(
+              "android/app/build.gradle"
+          )
+
+          gradle_text = gradle.read_text(
+              encoding="utf-8"
+          )
+
+          if "useLegacyPackaging = true" not in gradle_text:
+
+              gradle_marker = '''    buildFeatures {
+          '''
+
+              gradle_block = '''    packaging {
+              jniLibs {
+                  useLegacyPackaging = true
+              }
+          }
+
+          '''
+
+              if gradle_marker not in gradle_text:
+                  raise SystemExit(
+                      "ERRO: buildFeatures nao encontrado "
+                      "em android/app/build.gradle."
+                  )
+
+              gradle_text = gradle_text.replace(
+                  gradle_marker,
+                  gradle_block + gradle_marker,
+                  1
+              )
+
+              gradle.write_text(
+                  gradle_text,
+                  encoding="utf-8"
+              )
+
+              print(
+                  "Legacy JNI packaging adicionado."
+              )
+
+          else:
+              print(
+                  "Legacy JNI packaging ja presente."
+              )
+
+
+          # ========================================================
+          # MANIFEST
+          # ========================================================
+
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
+
+          manifest_text = manifest.read_text(
+              encoding="utf-8"
+          )
+
+          if (
+              'android:extractNativeLibs="true"'
+              not in manifest_text
+          ):
+
+              app_marker = '''    <application
+          '''
+
+              replacement = '''    <application
+              android:extractNativeLibs="true"
+          '''
+
+              if app_marker not in manifest_text:
+                  raise SystemExit(
+                      "ERRO: <application> nao encontrado "
+                      "no AndroidManifest.xml."
+                  )
+
+              manifest_text = manifest_text.replace(
+                  app_marker,
+                  replacement,
+                  1
+              )
+
+              manifest.write_text(
+                  manifest_text,
+                  encoding="utf-8"
+              )
+
+              print(
+                  "extractNativeLibs=true adicionado."
+              )
+
+          else:
+              print(
+                  "extractNativeLibs=true ja presente."
+              )
+          PY
+
+          echo
+          echo "========================================"
+          echo " Verificando fix Android 15/16"
+          echo "========================================"
+
+          grep -n \
+            "max-page-size" \
+            android/app/CMakeLists.txt
+
+          echo
+
+          grep -n \
+            -A5 \
+            "packaging {" \
+            android/app/build.gradle
+
+          echo
+
+          grep -n \
+            "extractNativeLibs" \
+            android/app/src/main/AndroidManifest.xml
 
           cd ..
 
           git -C upstream diff -- . \
             > controllerx-patched-source.diff
 
+
+      # ============================================================
+      # LIMPAR CACHE NATIVO
+      # ============================================================
+
       - name: Clean stale Android native build cache
         shell: bash
         run: |
           set -euo pipefail
 
-          rm -rf upstream/android/app/.cxx
-          rm -rf upstream/android/app/build/intermediates/cxx
+          rm -rf \
+            upstream/android/app/.cxx
 
-          echo "Native CMake cache removido."
+          rm -rf \
+            upstream/android/app/build/intermediates/cxx
+
+          echo
+          echo "Cache CMake antigo removido."
+
+
+      # ============================================================
+      # BUILD
+      # ============================================================
 
       - name: Build APK
         shell: bash
@@ -279,17 +604,141 @@ jobs:
 
           chmod +x gradlew
 
-          echo "===== Gradle version ====="
+          echo
+          echo "========================================"
+          echo " Gradle"
+          echo "========================================"
+
           ./gradlew --version
 
-          echo "===== Building ControllerX APK ====="
+          echo
+          echo "========================================"
+          echo " Compilando ControllerX"
+          echo "========================================"
 
           ./gradlew \
             --no-daemon \
             --stacktrace \
             assembleDebug \
             2>&1 \
-            | tee ../../controllerx-android-build.log
+            | tee \
+            ../../controllerx-android-build.log
+
+
+      # ============================================================
+      # VALIDAR O APK ANTES DE ENTREGAR
+      # ============================================================
+
+      - name: Validate ControllerX APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="upstream/android/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERRO: APK nao encontrado."
+            exit 1
+          fi
+
+          echo
+          echo "========================================"
+          echo " APK encontrado"
+          echo "========================================"
+
+          ls -lh "$APK"
+
+          rm -rf /tmp/controllerx-apk-check
+
+          mkdir -p \
+            /tmp/controllerx-apk-check
+
+          unzip -p \
+            "$APK" \
+            lib/arm64-v8a/libchiaki-jni.so \
+            > /tmp/controllerx-apk-check/libchiaki-jni.so
+
+          if [ ! -s \
+            /tmp/controllerx-apk-check/libchiaki-jni.so \
+          ]; then
+
+            echo
+            echo "ERRO: libchiaki-jni.so ARM64 nao encontrada."
+
+            exit 1
+          fi
+
+          echo
+          echo "========================================"
+          echo " ELF ARM64"
+          echo "========================================"
+
+          readelf -lW \
+            /tmp/controllerx-apk-check/libchiaki-jni.so \
+            | tee \
+            controllerx-readelf-arm64.txt
+
+          echo
+          echo "========================================"
+          echo " Alinhamento dos segmentos LOAD"
+          echo "========================================"
+
+          mapfile -t LOAD_ALIGNMENTS < <(
+            readelf -lW \
+              /tmp/controllerx-apk-check/libchiaki-jni.so \
+              | awk '$1 == "LOAD" {print $NF}'
+          )
+
+          if [ "${#LOAD_ALIGNMENTS[@]}" -eq 0 ]; then
+
+            echo "ERRO: nenhum segmento LOAD encontrado."
+
+            exit 1
+          fi
+
+          for ALIGN in "${LOAD_ALIGNMENTS[@]}"
+          do
+
+            echo "LOAD alignment: $ALIGN"
+
+            ALIGN_DEC=$((ALIGN))
+
+            if [ "$ALIGN_DEC" -lt 16384 ]; then
+
+              echo
+              echo "ERRO:"
+              echo "Biblioteca ARM64 ainda possui"
+              echo "segmento abaixo de 16 KB."
+
+              exit 1
+            fi
+
+          done
+
+          echo
+          echo "========================================"
+          echo " 16 KB ELF: OK"
+          echo "========================================"
+
+          echo
+          echo "========================================"
+          echo " APK JNI entry"
+          echo "========================================"
+
+          unzip -lv \
+            "$APK" \
+            | grep \
+            "lib/arm64-v8a/libchiaki-jni.so" \
+            | tee \
+            controllerx-apk-jni-entry.txt
+
+          echo
+          echo "APK passou na verificacao nativa."
+
+
+      # ============================================================
+      # PREPARAR ARTEFATO
+      # ============================================================
 
       - name: Prepare APK artifact
         if: success()
@@ -299,25 +748,29 @@ jobs:
 
           APK="upstream/android/app/build/outputs/apk/debug/app-debug.apk"
 
-          echo "Procurando APK em:"
-          echo "$APK"
-
           test -f "$APK"
 
           cp \
             "$APK" \
-            ControllerX-Android-v3.2-PRO-MODS-debug.apk
+            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.apk
 
           sha256sum \
-            ControllerX-Android-v3.2-PRO-MODS-debug.apk \
+            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.apk \
             | tee \
-            ControllerX-Android-v3.2-PRO-MODS-debug.sha256
+            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.sha256
 
           echo
-          echo "===== APK GERADO ====="
+          echo "========================================"
+          echo " APK FINAL GERADO"
+          echo "========================================"
 
           ls -lh \
-            ControllerX-Android-v3.2-PRO-MODS-debug.apk
+            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.apk
+
+
+      # ============================================================
+      # UPLOAD DO APK
+      # ============================================================
 
       - name: Upload ControllerX APK
         if: success()
@@ -325,10 +778,15 @@ jobs:
         with:
           name: ControllerX-Android-APK
           path: |
-            ControllerX-Android-v3.2-PRO-MODS-debug.apk
-            ControllerX-Android-v3.2-PRO-MODS-debug.sha256
+            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.apk
+            ControllerX-Android-v3.2-PRO-MODS-ANDROID16.sha256
           if-no-files-found: error
           retention-days: 30
+
+
+      # ============================================================
+      # DIAGNÓSTICOS
+      # ============================================================
 
       - name: Upload build diagnostics
         if: always()
@@ -338,5 +796,7 @@ jobs:
           path: |
             controllerx-android-build.log
             controllerx-patched-source.diff
+            controllerx-readelf-arm64.txt
+            controllerx-apk-jni-entry.txt
           if-no-files-found: ignore
           retention-days: 14
