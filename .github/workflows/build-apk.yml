@@ -23,12 +23,26 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Install native build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler python3-protobuf
+          protoc --version
+          python3 - <<'PYPROTO'
+          import google.protobuf
+          print("python protobuf:", google.protobuf.__version__)
+          PYPROTO
+
       - name: Install Android NDK and CMake
         shell: bash
         run: |
           set -euo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
+          "$ANDROID_HOME/cmake/3.22.1/bin/cmake" --version
+          test -x "$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
 
       - name: Clone pinned Chiaki Android base
         shell: bash
